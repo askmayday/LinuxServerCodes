@@ -22,7 +22,8 @@ int setnonblocking( int fd )
     fcntl( fd, F_SETFL, new_option );
     return old_option;
 }
-
+/* 向 epoll 内核事件表中添加新事件
+*/
 void addfd( int epollfd, int fd, bool enable_et )
 {
     epoll_event event;
@@ -42,7 +43,7 @@ void lt( epoll_event* events, int number, int epollfd, int listenfd )
     for ( int i = 0; i < number; i++ )
     {
         int sockfd = events[i].data.fd;
-        if ( sockfd == listenfd )
+        if ( sockfd == listenfd ) //??
         {
             struct sockaddr_in client_address;
             socklen_t client_addrlength = sizeof( client_address );
@@ -71,15 +72,26 @@ void lt( epoll_event* events, int number, int epollfd, int listenfd )
 void et( epoll_event* events, int number, int epollfd, int listenfd )
 {
     char buf[ BUFFER_SIZE ];
+    //遍历就绪事件组，
+    //1 若就绪事件fd是监听fd，即客户端有新连接请求，则接受并将新连接fd加入内核事件表（使用addfd()）
+    //2 否则判断事件类型，若为EPOLLIN（事件可读），则接收事件fd内容并打印到终端
     for ( int i = 0; i < number; i++ )
     {
         int sockfd = events[i].data.fd;
+        //修改代码，只能进行一次客户端连接
+        static bool flag = true;
+        if (flag)
+        {
+
         if ( sockfd == listenfd )
         {
             struct sockaddr_in client_address;
             socklen_t client_addrlength = sizeof( client_address );
             int connfd = accept( listenfd, ( struct sockaddr* )&client_address, &client_addrlength );
             addfd( epollfd, connfd, true );
+        }
+
+        flag = false;
         }
         else if ( events[i].events & EPOLLIN )
         {
@@ -117,13 +129,14 @@ void et( epoll_event* events, int number, int epollfd, int listenfd )
 
 int main( int argc, char* argv[] )
 {
-    if( argc <= 2 )
+    if( argc <= 3 )
     {
-        printf( "usage: %s ip_address port_number\n", basename( argv[0] ) );
+        printf( "usage: %s ip_address port_number isET\n", basename( argv[0] ) );
         return 1;
     }
     const char* ip = argv[1];
     int port = atoi( argv[2] );
+    bool isET = atoi( argv[3] );
 
     int ret = 0;
     struct sockaddr_in address;
@@ -148,15 +161,18 @@ int main( int argc, char* argv[] )
 
     while( 1 )
     {
+        //epoll_wait 从epollfd指定的内核事件表中复制就绪事件到events数组中，返回就绪fd个数
         int ret = epoll_wait( epollfd, events, MAX_EVENT_NUMBER, -1 );
         if ( ret < 0 )
         {
             printf( "epoll failure\n" );
             break;
         }
-    
-        lt( events, ret, epollfd, listenfd );
-        //et( events, ret, epollfd, listenfd );
+
+        if (isET)
+            et( events, ret, epollfd, listenfd );
+        else
+            lt( events, ret, epollfd, listenfd );
     }
 
     close( listenfd );
